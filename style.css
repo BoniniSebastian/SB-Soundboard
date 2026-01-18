@@ -1,0 +1,79 @@
+/* Grund */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, system-ui, Arial, sans-serif;
+  background: #000;
+  color: #fff;
+  height: 100vh;
+}
+
+/* Tvinga tänk landscape */
+@media (orientation: portrait) {
+  body::before {
+    content: "Vrid telefonen till liggande läge";
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    z-index: 999;
+  }
+}
+
+/* Rubrik */
+h1 {
+  text-align: center;
+  margin: 10px 0;
+  font-size: 20px;
+}
+
+/* Kategorier */
+.section {
+  padding: 8px;
+}
+
+.section-title {
+  font-size: 14px;
+  margin-bottom: 6px;
+  opacity: 0.7;
+}
+
+/* Grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+/* Knappar */
+.button {
+  height: 60px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Kategori 1 – MÅL */
+.goal {
+  background: #c62828;
+  color: #fff;
+}
+
+/* Kategori 2 – MUSIK */
+.music {
+  background: #333;
+  color: #fff;
+}
+
+/* Aktiv knapp */
+.playing {
+  outline: 3px solid #fff;
+}
