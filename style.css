@@ -1,79 +1,194 @@
-/* Grund */
-* {
-  box-sizing: border-box;
+/* =========================
+   SB SOUNDBOARD (iPhone/PWA)
+   - Två kategorier
+   - En låt åt gången
+   - Tryck samma knapp igen = STOPP
+   - MP3 väljs från mobilen
+   - Sparar MP3 i IndexedDB (stabilt)
+   - Sparar metadata i localStorage
+   ========================= */
+
+const DB_NAME = "sb_soundboard_db";
+const STORE = "files";
+const META_KEY = "sb-sounds-meta";
+
+let currentAudio = null;
+let currentButton = null;
+let currentUrl = null;
+
+// Metadata: { "goal-0": { name, fileKey }, ... }
+const meta = JSON.parse(localStorage.getItem(META_KEY) || "{}");
+
+/* ---------- IndexedDB helpers ---------- */
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
-body {
-  margin: 0;
-  font-family: -apple-system, system-ui, Arial, sans-serif;
-  background: #000;
-  color: #fff;
-  height: 100vh;
+async function idbSet(key, blob) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(blob, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-/* Tvinga tänk landscape */
-@media (orientation: portrait) {
-  body::before {
-    content: "Vrid telefonen till liggande läge";
-    position: fixed;
-    inset: 0;
-    background: #000;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    z-index: 999;
+async function idbGet(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* ---------- UI ---------- */
+const app = document.createElement("div");
+document.body.appendChild(app);
+
+createSection("MÅL", "goal", 5);
+createSection("MUSIK", "music", 18);
+
+function createSection(title, type, count) {
+  const section = document.createElement("div");
+  section.className = "section";
+
+  const h = document.createElement("div");
+  h.className = "section-title";
+  h.textContent = title;
+
+  const grid = document.createElement("div");
+  grid.className = "grid";
+
+  for (let i = 0; i < count; i++) {
+    const id = `${type}-${i}`;
+
+    const btn = document.createElement("button");
+    btn.className = `button ${type}`;
+    btn.textContent = meta[id]?.name || "+";
+
+    btn.onclick = async () => {
+      // Ingen fil kopplad -> välj mp3
+      if (!meta[id]) {
+        await pickFile(id, btn);
+        return;
+      }
+
+      // Fil finns -> spela/stoppa
+      await toggleSound(id, btn);
+    };
+
+    grid.appendChild(btn);
   }
+
+  section.appendChild(h);
+  section.appendChild(grid);
+  app.appendChild(section);
 }
 
-/* Rubrik */
-h1 {
-  text-align: center;
-  margin: 10px 0;
-  font-size: 20px;
+async function pickFile(id, btn) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "audio/*";
+
+  input.onchange = async () => {
+    try {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      // Spara blob i IndexedDB
+      const fileKey = `sb_${id}`;
+      await idbSet(fileKey, file);
+
+      // Spara metadata
+      meta[id] = {
+        name: file.name.replace(/\.[^/.]+$/, ""),
+        fileKey
+      };
+      localStorage.setItem(META_KEY, JSON.stringify(meta));
+
+      btn.textContent = meta[id].name;
+    } catch (e) {
+      alert("Kunde inte spara filen. Testa en mindre fil eller se till att den är nedladdad i Filer.");
+      console.error(e);
+    } finally {
+      input.value = "";
+    }
+  };
+
+  input.click();
 }
 
-/* Kategorier */
-.section {
-  padding: 8px;
+async function toggleSound(id, btn) {
+  // Samma knapp igen -> stopp
+  if (currentButton === btn) {
+    stopCurrent();
+    return;
+  }
+
+  stopCurrent();
+
+  const fileKey = meta[id]?.fileKey;
+  if (!fileKey) {
+    alert("Ingen fil kopplad. Tryck + och välj en mp3.");
+    return;
+  }
+
+  const blob = await idbGet(fileKey);
+  if (!blob) {
+    alert("Filen hittades inte längre. Koppla mp3:n igen.");
+    delete meta[id];
+    localStorage.setItem(META_KEY, JSON.stringify(meta));
+    btn.textContent = "+";
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+
+  try {
+    await audio.play();
+  } catch (e) {
+    // iOS kräver ibland extra user-gesture; men knapptryck brukar räcka
+    alert("Kunde inte spela upp. Prova igen.");
+    console.error(e);
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  currentAudio = audio;
+  currentButton = btn;
+  currentUrl = url;
+
+  btn.classList.add("playing");
+
+  audio.onended = () => {
+    stopCurrent();
+  };
 }
 
-.section-title {
-  font-size: 14px;
-  margin-bottom: 6px;
-  opacity: 0.7;
-}
+function stopCurrent() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  }
+  if (currentButton) {
+    currentButton.classList.remove("playing");
+  }
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl);
+  }
 
-/* Grid */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 8px;
-}
-
-/* Knappar */
-.button {
-  height: 60px;
-  border-radius: 8px;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* Kategori 1 – MÅL */
-.goal {
-  background: #c62828;
-  color: #fff;
-}
-
-/* Kategori 2 – MUSIK */
-.music {
-  background: #333;
-  color: #fff;
-}
-
-/* Aktiv knapp */
-.playing {
-  outline: 3px solid #fff;
+  currentAudio = null;
+  currentButton = null;
+  currentUrl = null;
 }
